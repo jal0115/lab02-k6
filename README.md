@@ -1,81 +1,175 @@
-# Lab 02 — Performance & Load Testing with k6
+# Lab 02 — Гүйцэтгэлийн хэмжүүрийг k6-аар хэмжих
 
-* **Оюутны нэр:** Г. Лувсанжал 
+* **Оюутны нэр:** Г. Лувсанжал
 * **Оюутны код:** B242270016
 
 ---
 
-## 1. k6 Environment & Version
-
-Тестийг ажиллуулсан k6 хувилбар:
+## 1. k6 хувилбар
 
 ```bash
 $ k6 version
-k6 v2.2.0 (commit/unknown, go1.22.0, linux/amd64)
-
+k6 v2.2.0 (commit/00a9a1b7f5, go1.26.5, linux/amd64)
 ```
 
----
+## Тестийн байг
 
-## 2. Локал сервер туршилт (Алхам 5)
-
-Сүлжээний болон интернетийн хэлбэлзэлгүйгээр (noise) серверийн дотоод боловсруулалтын хурдыг хэмжих зорилгоор Node.js Express локал сервер ажиллуулж туршив. Энэхүү сервер дээр хэвийн хүснэгт болон 100ms хүлээлттэй (`setTimeout`) endpoint-уудыг үүсгэж харьцуулсан болно:
-
-* **`/fast` endpoint:** Шууд хариу буцаах (p95 = ~8.01 ms)
-* **`/slow` endpoint:** 100ms хүлээлттэй (`setTimeout(100)`) (p95 = ~107.63 ms)
-
-Энэхүү туршилт нь серверийн код болон хүлээлт (delay) нэмэгдэхэд k6 яг нарийн ялгааг хэмжиж чадаж байгааг баталсан юм.
+- `https://test.k6.io` — зааврын дадлагын сайт (5/30/100 VU, stages, threshold тестүүд)
+- `http://localhost:3000` — локал Express сервер (`/fast`, `/slow` endpoint)
 
 ---
 
-## 3. Load Testing Results (5 / 30 / 100 VU)
+## 2. Baseline тест (Алхам 2)
 
-Тестийн бодит үр дүнгүүдийг терминалын гаралтаас авч `results/` хавтас доторх файлуудад хадгалсан бөгөөд доорх хүснэгтийн утгууд тэдгээр файлуудтай яг 100% таарч байгаа болно.
+Анхны 5 VU-ийн тестийн бүтэн гаралт: `results/run-05vu.txt`, дэлгэцний зураг: `screenshots/run-05vu.png`
 
-| VU (Virtual Users) | p90 | p95 | Throughput | Error Rate | Текст файлын зам |
-| --- | --- | --- | --- | --- | --- |
-| **5 VU** | 307.85 ms | 308.10 ms | 6.85 req/s (210 нийт) | 0.00% | `results/run-05vu.txt` |
-| **30 VU** | 228.23 ms | 229.16 ms | 45.91 req/s (2812 нийт) | 0.00% | `results/run-30vu.txt` |
-| **100 VU** | 227.89 ms | 230.84 ms | 150.80 req/s (9200 нийт) | 0.00% | `results/run-100vu.txt` |
+**Baseline p95 = 309.14ms** — энэ утга дараа SLO-г тооцоход ашиглагдана (доор 5-р хэсэгт).
 
 ---
 
-## 4. SLO (Service Level Objectives) & Thresholds
+## 3. Ачааллын түвшин 5 → 30 → 100 VU (тус тусад нь ажиллуулсан)
 
-Baseline (5 VU) тестээс гарсан `p(95) = 308.10ms` үр дүнд суурилан дараах SLO болон threshold-уудыг тодорхойлж шалгасан болно.
+| VU | p90 | p95 | Throughput | Error rate | Файл |
+|---|---|---|---|---|---|
+| **5 VU** | 308.48ms | **309.14ms** | 6.77 req/s (210 нийт) | 0.00% | `results/run-05vu.txt` |
+| **30 VU** | 226.78ms | **227.35ms** | 45.49 req/s (2760 нийт) | 0.00% | `results/run-30vu.txt` |
+| **100 VU** | 226.4ms | **227.12ms** | 151.12 req/s (9260 нийт) | 0.00% | `results/run-100vu.txt` |
 
-### A. PASS Test Result
+Screenshots: `screenshots/run-30vu.png`, `screenshots/run-100vu.png`
 
-Босго утгыг `p(95) < 564ms` гэж өргөн хүрээтэй тогтооход бодит хэмжилт `308.31ms` гарч шаардлагыг амжилттай хангасан:
+**Тайлбар:** Дээрх гурван мөр тус бүр `script.js`-ийг тусдаа ажиллуулалтаар (5/30/100 VU тус бүрийг тусдаа `k6 run` командаар) авсан бодит хэмжилт. `stages`-тэй нэг ажиллуулалт нэгтгэсэн ганц summary өгдөг тул хүснэгтийн эх сурвалж болгон ашиглагдаагүй.
+
+---
+
+## 4. Stages туршилт (5→30→100→0 тасралтгүй ачаалал)
+
+`script-stages.js`-ийг ашиглан ачааллыг тасралтгүй 5-аас 100 VU хүртэл өсгөж, дараа нь 0 хүртэл бууруулах туршилт хийв:
 
 ```javascript
-thresholds: {
-  http_req_duration: ['p(95) < 564'],
-  http_req_failed: ['rate < 0.01'],
-}
-
+export const options = {
+  stages: [
+    { duration: '30s', target: 5 },
+    { duration: '1m', target: 30 },
+    { duration: '30s', target: 100 },
+    { duration: '30s', target: 0 },
+  ],
+};
 ```
 
-* **Үр дүн:** `✓ 'p(95) < 564' p(95)=308.31ms` (PASS) болон `✓ 'rate < 0.01' rate=0.00%` (PASS). *(Файл: `results/run-thresholds-pass.txt`)*
+| Хэмжүүр | Утга |
+|---|---|
+| p90 | 227.07ms |
+| p95 | 230.16ms |
+| Throughput | 46.99 req/s (7064 нийт) |
+| Error rate | 0.00% |
 
-### B. FAIL Test Result
+Файл: `results/run-stages.txt`, Screenshot: `screenshots/run-stages.png`
 
-Чанарын хяналтын босгыг хэт хатуу буюу `p(95) < 10ms` болгож тохируулахад бодит серверийн хариу өгөх хугацаа үүнээс өндөр байсан тул алдаа зааж унасан:
+---
+
+## 5. SLO (Threshold) — PASS ба FAIL
+
+### SLO-гийн сонголтын тайлбар
+
+Baseline (5 VU, Алхам 2) p95 = **309.14ms**. SLO-г зааврын жишээ тоог хуулбарлахын оронд өөрийн baseline дээр үндэслэн дараах томьёогоор гаргав:
+
+```
+SLO = baseline_p95 × 1.5 = 309.14 × 1.5 ≈ 464ms
+```
+
+### A. PASS
 
 ```javascript
-thresholds: {
-  http_req_duration: ['p(95) < 10'], // Хэт хатуу босго
-  http_req_failed: ['rate < 0.01'],
-}
+export const options = {
+  vus: 30, duration: "1m",
+  thresholds: {
+    http_req_duration: ['p(95)<464'],
+    http_req_failed: ['rate<0.01'],
+  },
+};
+```
+Гаралт (`results/run-thresholds-pass.txt`):
+```
+✓ 'p(95)<464' p(95)=229.75ms
+✓ 'rate<0.01' rate=0.00%
+```
+Screenshot: `screenshots/threshold-pass.png`
 
+### B. FAIL
+
+```javascript
+export const options = {
+  vus: 30, duration: "1m",
+  thresholds: {
+    http_req_duration: ['p(95)<10'],
+    http_req_failed: ['rate<0.01'],
+  },
+};
+```
+Гаралт (`results/run-thresholds-fail.txt`):
+```
+✗ 'p(95)<10' p(95)=230.12ms
+✓ 'rate<0.01' rate=0.00%
+ERRO[0061] thresholds on metrics 'http_req_duration' have been crossed
+```
+Screenshot: `screenshots/threshold-fail.png`
+
+Хоёр script (`script-threshold-pass.js`, `script-threshold-fail.js`) хоёулаа repo-д commit хийгдсэн — README-д бичсэн threshold бүр кодтой яг таарч байна.
+
+---
+
+## 6. Локал сервер (network variance-гүй харьцуулалт)
+
+`test.k6.io`-ийн үр дүнд network noise хэр нөлөөлж байгааг шалгахын тулд локал Express сервер ашиглан харьцуулалт хийв:
+
+```javascript
+app.get('/fast', (req, res) => {
+  res.json({ status: 'ok', type: 'fast' });
+});
+
+app.get('/slow', (req, res) => {
+  setTimeout(() => {
+    res.json({ status: 'ok', type: 'slow' });
+  }, 100);
+});
 ```
 
-* **Үр дүн:** `✗ 'p(95) < 10' p(95)=308.65ms` (FAIL) болон `✓ 'rate < 0.01' rate=0.00%` (PASS). *(Файл: `results/run-thresholds-fail.txt`)*
+| Endpoint | p90 | p95 | Throughput | Файл |
+|---|---|---|---|---|
+| `/fast` | 6.36ms | **7.76ms** | 29.87 req/s | `results/run-local-fast.txt` |
+| `/slow` | 106.12ms | **107.16ms** | 27.16 req/s | `results/run-local-slow.txt` |
+
+Screenshots: `screenshots/run-local-fast.png`, `screenshots/run-local-slow.png`
+
+`/fast` болон `/slow`-ийн p95 зөрүү (~99.4ms) нь кодод оруулсан `setTimeout(100)`-той нарийн таарч байгаа тул энэ хэмжилт network noise-гүй, зөвхөн server-side latency-г цэвэр харуулж байна.
 
 ---
 
-## 5. Дүгнэлт (Conclusion)
+## 7. Дүгнэлт
 
-Энэхүү лабаар виртуал хэрэглэгчдийн тоог 5-аас 30, улмаар 100 болгож өсгөхөд системийн дамжуулалтын хурд (throughput) `6.85 req/s`-ээс `150.80 req/s` болж мэдэгдэхүйц өссөн байна. Туршилтын туршид ямар нэгэн серверийн алдаа гаралгүй алдааны хувь (error rate) тогтмол `0.00%` байсан нь систем ачааллыг сайн тэсвэрлэж байгааг харууллаа. Лекцээр үзсэн хэрэглэгчийн тоо болон хариу өгөх хугацааны хамаарал, ачааллын дор систем хэрхэн ажиллах тухай ойлголтууд бодит туршилтаар бүрэн батлагдсан юм. Бидний тодорхойлсон анхны SLO нь baseline хэмжилтэд үндэслэсэн бөгөөд зохих босго тавихад PASS болон FAIL үр дүнг яг ялгаж харуулж чадсан. k6 хэрэгсэл нь CI/CD болон автомат тестэд ашиглахад маш хялбар бөгөөд threshold ашиглан чанарын шалгуур тавих боломж олгодог болохыг практик дээр туршиж үзлээ. Локал сервер болон public сервер дээрх тестүүдийг харьцуулж үзэхэд сүлжээний саатал ямар үүрэгтэй болохыг ойлгож авсан. Энэхүү ажил нь програм хангамжийн гүйцэтгэл болон найдвартай байдлыг эрт үе шатанд шалгахын чухлыг ойлгууллаа. Цаашид илүү олон VU болон complex scenario ашиглан стресс тест хийх боломжтой юм.
+Энэхүү лабораторийн ажлаар k6 хэрэгслээр `test.k6.io` сайтын гүйцэтгэлийг 5, 30, 100 VU гэсэн гурван түвшинд, мөн 5→30→100→0 тасралтгүй stages горимоор хэмжив. Ачаалал 5 VU-с 30, 100 VU болж өсөхөд p95 latency 309.14ms-с 227ms орчим болж буурсан нь эхлээд гайхмаар мэт санагдсан ч, шалтгаан нь `test.k6.io` серверийн өндөр хүчин чадал, эхний ажиллуулалтын TLS/DNS зардал, мөн интернетийн сүлжээний хэлбэлзэл (network variance) байж болзошгүй гэж дүгнэв. Энэ таамаглалыг шалгахын тулд локал Express сервер ашиглан network noise-гүй орчинд `/fast` болон `/slow` endpoint-ийг харьцуулахад, кодод оруулсан яг 100ms-тай нарийн таарсан зөрүү (7.76ms → 107.16ms) ажиглагдсан нь сервер талын боловсруулалтын хугацаа load-той шууд хамааралтай болохыг батлав. Throughput нь ачаалал өсөх тусам шугаман байдлаар өссөн (6.77 → 45.49 → 151.12 req/s), энэ нь `test.k6.io` серверт тестэлсэн хэмжээнд хараахан хүчин чадлын хязгаарт хүрч чадаагүйг илтгэнэ. Бүх ажиллуулалтын турш error rate 0.00% байсан нь тестэлсэн ачааллын хэмжээнд алдаа гарган зогсох цэгт хараахан хүрээгүйг харуулж байна. SLO-г эхний baseline (5 VU) p95 = 309.14ms дээр үндэслэн ×1.5 = 464ms гэж тодорхойлсноор, 30 VU-ийн бодит p95 (229.75ms) хэмжээгээр амархан PASS болов. FAIL нөхцлийг харуулахын тулд threshold-ыг санаатайгаар `p(95)<10` болгож хатууруулахад, бодит p95 (230.12ms) хэтэрсэн тул `ERRO` мессежтэйгээр амжилтгүй болсон нь k6-ийн threshold механизм CI/CD орчинд quality gate болж ажиллах жишээг тодорхой харуулав. Stages горимоор ачааллыг тасралтгүй өсгөж бууруулахад p95 (230.16ms) нь тусдаа 30/100 VU ажиллуулалтуудтай нийцтэй байсан нь тестийн үр дүнгийн тогтвортой байдлыг баталгаажуулав. Ерөнхийдөө энэ лабораторийн ажил нь latency (p95), throughput, error rate гэсэн гурван үндсэн хэмжүүрийг бодит хэрэгслээр хэмжиж, тэдгээрийг хэрхэн уншиж, SLO болгон ашиглахыг ойлгоход тустай туршлага болов.
 
 ---
+
+## Ажиллуулах заавар
+
+```bash
+# k6 суулгах (Debian/Ubuntu)
+sudo apt install k6
+
+# Baseline болон ачааллын түвшин
+k6 run script.js | tee results/run-05vu.txt
+k6 run --vus 30 --duration 1m script.js | tee results/run-30vu.txt
+k6 run --vus 100 --duration 1m script.js | tee results/run-100vu.txt
+
+# Stages
+k6 run script-stages.js | tee results/run-stages.txt
+
+# Threshold PASS/FAIL
+k6 run script-threshold-pass.js | tee results/run-thresholds-pass.txt
+k6 run script-threshold-fail.js | tee results/run-thresholds-fail.txt
+
+# Локал сервер (өөр terminal дээр node local-server/server.js ажиллуулсны дараа)
+k6 run script-local.js | tee results/run-local-fast.txt   # /fast URL-тай үед
+k6 run script-local.js | tee results/run-local-slow.txt   # /slow URL-тай үед
+```
